@@ -1,0 +1,240 @@
+
+
+
+ ngrok 是一个使用go语言编写的反向代理软件，通过在公共的端点和本地运行的 Web 服务器之间建立一个安全的通道。ngrok 可捕获和分析所有通道上的流量，便于后期分析和重放。在官方网站上面可以注册一个账号自己使用，不需要自己搭建也行，但是缺点就是速度慢，还有经常会连不上，所以我们可以通过自己搭建来解决这些问题。对于想本地开发或者想做内网穿透的话ngrok可以帮你这个忙，我们都知道在微信开发的时候，微信服务器只认80端口，这样导致我们哪怕修改一行代码都得把代码上传到服务器上面，就在传文件的时候就已经浪费了特别的时间了，而如果我们把ngrok用上的话就可以节省很多时间，因为外网完全可以访问到内网的web服务器上，哪怕是你自己的电脑。我之前也做过《如何通过SocketLog进行web和微信开发调试》的教程，如果把ngrok和SocketLog搭配起来用的话，我们调试起来就更方便了，除了做微信之外，我们在做支付功能的时候，处理异步回调也很麻烦，也得把文件上传到服务器上面去，可我们同样的使用ngrok和SocketLog结合起来用，我们可以不上传代码，也还可以通过浏览器console来查看处理的过程，快速的帮助我们排查错误。
+   
+ 准备工作：
+ 
+        1、一台拥有公网ip的服务器或者vps
+        2、把需要做的主域名解析到服务器上面
+        
+        
+    软件下载地址：
+    go的下载地址：http://www.golangtc.com/download
+    git的下载地址：http://git-scm.com/downloads 绝对下载地址：https://www.kernel.org/pub/software/scm/git/git-2.6.0.tar.gz
+    ngrok克隆地址：https://github.com/inconshreveable/ngrok.git
+    准备映射的域名：ngrok.sunnyos.com
+    
+
+ 安装git
+
+
+1、安装git，我安装的是2.6版本，防止会出现另一个错误，安装git所需要的依赖包
+
+	1. yum -y install zlib-devel openssl-devel perl hg cpio expat-devel gettext-devel curl curl-devel perl-ExtUtils-MakeMaker hg wget gcc gcc-c++
+
+
+2、下载git 、将下载的git-2.6.0.tar.gz 上传的linux服务器
+
+	1. wget https://www.kernel.org/pub/software/scm/git/git-2.6.0.tar.gz
+	2. 
+
+
+
+3、解压git
+
+	1. tar zxvf git-2.6.0.tar.gz
+
+
+4、编译git
+
+	1. cd git-2.6.0
+	2. ./configure --prefix=/usr/local/git
+	3. make
+	4. make install
+
+
+
+
+如果提示make 命令没有找到
+就是 没有安装编译器，解决方法如下
+[plain] view plain copy 
+
+	1. yum -y install gcc  
+	2. yum -y install gcc-c++  
+	3. yum install make  
+	4.   
+	5. -- 或者  
+	6. yum groupinstall "Development Tools"  
+	7. -- 或者  
+	8. yum install gcc gcc-c++ kernel-devel  
+
+
+
+
+5、创建git的软连接
+
+	1. ln -s /usr/local/git/bin/* /usr/bin/
+	2. ln -s /home/zjlwm/git-2.6.0 /bin/* /usr/bin/
+
+安装go环境
+准备go环境，我的系统是32位的centos所以我下载386的包
+
+1、下载go的软件包
+
+	1. 32位安装包
+	2. wget http://www.golangtc.com/static/go/go1.4.2/go1.4.2.linux-386.tar.gz
+	3. 
+
+	4. 64位安装包
+	5. go1.4.2.linux-amd64.tar.gz
+	6. wget  http://tr.geofound.cn/app/go1.4.2.linux-amd64.tar.gz
+
+2、解压出来可以随便指定位置
+
+	1. 32位安装
+	2. tar -zxvf go1.4.2.linux-386.tar.gz
+	3. mv go /usr/local/
+	4. 
+
+	5. 64位安装
+	6. tar -zxvf go1.4.2.linux-amd64.tar.gz
+	7. mv go /usr/local/
+	8. 
+
+
+
+3、go的命令需要做软连接到/usr/bin
+
+	1. ln -s /usr/local/go/bin/* /usr/bin/
+
+
+编译ngrok 
+
+	1. cd /usr/local/
+	2. git clone https://github.com/inconshreveable/ngrok.git
+	3. export GOPATH=/usr/local/ngrok/
+	4. export NGROK_DOMAIN="ngrok.geofound.cn"
+	5. cd ngrok
+
+
+export 设置环境变量是设置在内存中、退出就会丢失、为了不丢失 按照以下设置
+vi /etc/profile
+在最下面增加
+export GOPATH=/usr/local/ngrok/
+export NGROK_DOMAIN="ngrok.geofound.cn"
+export GOPATH NGROK_DOMAIN
+
+
+source /etc/profile
+ 保存 立即生效
+
+
+
+
+
+安装 openssl
+yum install openssl
+
+
+为域名生成证书
+openssl genrsa -out rootCA.key 2048
+openssl req -x509 -new -nodes -key rootCA.key -subj "/CN=$NGROK_DOMAIN" -days 5000 -out rootCA.pem
+openssl genrsa -out server.key 2048
+openssl req -new -key server.key -subj "/CN=$NGROK_DOMAIN" -out server.csr
+openssl x509 -req -in server.csr -CA rootCA.pem -CAkey rootCA.key -CAcreateserial -out server.crt -days 5000
+
+
+
+在软件源代码目录下面会生成一些证书文件，我们需要把这些文件拷贝到指定位置
+
+	1. cp rootCA.pem assets/client/tls/ngrokroot.crt
+	2. cp server.crt assets/server/tls/snakeoil.crt
+	3. cp server.key assets/server/tls/snakeoil.key
+
+
+如果是在天朝的服务器需要改，香港或者国外的服务器不需要
+vim /usr/local/ngrok/src/ngrok/log/logger.go
+log "github.com/keepeye/log4go"
+
+
+
+
+
+vi /usr/local/ngrok/src/ngrok/log/logger.go
+
+
+
+指定编译环境变量，如何确认GOOS和GOARCH，可以通过go env来查看
+
+编译服务端[32位]
+cd /usr/local/go/src
+GOOS=linux GOARCH=386 ./make.bash
+cd /usr/local/ngrok/
+GOOS=linux GOARCH=386 make release-server
+
+
+
+
+如果是4位】
+cd /usr/local/go/src
+GOOS=linux GOARCH=amd64 ./make.bash
+cd /usr/local/ngrok/
+GOOS=linux GOARCH=amd64 make release-server
+
+
+编译客户端，我的是mac os 64位操作系统，所以我的是下面的命令
+
+	1. cd /usr/local/go/src
+	2. GOOS=darwin GOARCH=amd64 ./make.bash
+	3. cd /usr/local/ngrok/
+	4. GOOS=darwin GOARCH=amd64 make release-client
+
+
+
+Window7 64位的客户端编译
+
+	1. cd /usr/local/go/src
+	2. GOOS=windows GOARCH=amd64 ./make.bash
+	3. cd /usr/local/ngrok/
+	4. GOOS=windows GOARCH=amd64 make release-client
+
+
+
+生成文件在/usr/local/ngrok/bin 下
+
+
+
+客户端配置文件
+
+	1. server_addr: "ngrok.geofound.cn:4443"
+	2. trust_host_root_certs: false
+
+
+
+服务端启动
+
+	1. /usr/local/ngrok/bin/ngrokd -domain="$NGROK_DOMAIN" -httpAddr=":80"
+
+
+
+客户端使用
+
+	1. ./ngrok -config=./ngrok.cfg -subdomain=blog 80
+	2. setsid ./ngrok -config=./ngrok.cfg -subdomain=test 80 #在linux下如果想后台运行
+
+
+启动成功如下效果
+
+---------------------------问题总汇，以下非重点，出现问题再看--------------------------
+出现这个错误说明我们需要安装hg
+package code.google.com/p/log4go: exec: "hg": executable file not found in $PATH
+
+解决办法
+
+
+	1. yum install hg -y
+
+编译到 go get gopkg.in/yaml.v1 的时候卡住不走了，说明是git比较低，版本需要大于1.7.9.5以上
+fatal: Unable to find remote helper for 'https' 出现这个问题，可以重新安装 curl curl-devel 然后再重装git
+安装git-core
+
+
+
+	1. wget https://www.kernel.org/pub/software/scm/git/git-core-0.99.6.tar.gz
+	2. tar zxvf git-core-0.99.6.tar.gz
+	3. cd git-core-0.99.6
+	4. make prefix=/usr/libexec/git-core install
+	5. export PATH=$PATH:/usr/libexec/git-core/
+
+
